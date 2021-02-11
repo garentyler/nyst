@@ -99,7 +99,6 @@ impl Parser {
         use ParserKind::*;
         let s: String = src.into();
         match &self.kind {
-            /// Parse a regular expression using the regex library.
             Regex(re) => {
                 if let Some(mat) = re.find(&s) {
                     if mat.start() == 0 {
@@ -114,10 +113,6 @@ impl Parser {
                     Err(s)
                 }
             }
-            /// Parse the left subparser AND the right subparser.
-            ///
-            /// If both succeed, return both results.
-            /// If either fail, fail parsing.
             And => {
                 if self.subparsers[0].kind == Ignore && self.subparsers[1].kind == Ignore {
                     Ok(("".into(), s))
@@ -140,12 +135,6 @@ impl Parser {
                     ))
                 }
             }
-            /// Parse the left subparser XOR the right subparser.
-            ///
-            /// If the left parser succeeds, return the result.
-            /// If the left parser fails, parse the right parser.
-            /// If the right parser succeeds, return the result.
-            /// If both the left and right parsers fail, fail parsing.
             Or => {
                 if let Ok(lresult) = self.subparsers[0].parse(s.clone()) {
                     Ok(lresult)
@@ -153,15 +142,7 @@ impl Parser {
                     self.subparsers[1].parse(s.clone())
                 }
             }
-            /// Parse the subparser and ignore the results by returning an empty string.
-            ///
-            /// If the subparser fails, fail parsing.
             Ignore => Ok(("".into(), self.subparsers[0].parse(s)?.1)),
-            /// Parse the subparser repeatedly.
-            ///
-            /// If an iteration fails before the minimum requirement is met, fail parsing.
-            /// If an iteration fails between the minimum and maximum requirements, return all results.
-            /// If the maximum number of iterations is reached, stop parsing and return all results.
             RepeatRange(range) => {
                 let mut matched = vec![];
                 let mut rest = s.clone();
@@ -188,7 +169,6 @@ impl Parser {
 
                 Ok((to_string(&matched).unwrap(), rest))
             }
-            /// Parse the subparser, and perform a computation on it before returning the result.
             Map(cfn) => {
                 let (matched, rest) = self.subparsers[0].parse(s)?;
                 if let Ok(m) = cfn(matched) {
@@ -197,7 +177,6 @@ impl Parser {
                     Err(rest)
                 }
             }
-            /// Custom user-defined parsing function.
             Custom(cfn) => cfn(s),
         }
     }
