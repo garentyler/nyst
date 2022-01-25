@@ -1,6 +1,38 @@
 use crate::*;
 use std::sync::{Arc, RwLock};
 
+pub struct IgnoreParser<A> {
+  pub parser: Arc<RwLock<dyn Parser<Output = A>>>,
+}
+impl<A> IgnoreParser<A> {
+  pub fn new(parser: &Arc<RwLock<dyn Parser<Output = A>>>) -> Self {
+    IgnoreParser {
+      parser: Arc::clone(parser),
+    }
+  }
+}
+impl<A> Clone for IgnoreParser<A> {
+  fn clone(&self) -> Self {
+    IgnoreParser {
+      parser: Arc::clone(&self.parser),
+    }
+  }
+}
+impl<A> Parser for IgnoreParser<A> {
+  type Output = ();
+
+  fn parse_unprotected(self: &mut Self, data: &[u8], offset: &mut usize) -> ParseResult<Self::Output> {
+    let parse_result = match self.parser.try_write() {
+      Ok(p) => p,
+      Err(_) => return Err(ParseError::LockedSubparser),
+    }.parse(data, offset);
+    match parse_result {
+      Ok(_result) => Ok(()),
+      Err(err) => Err(err),
+    }
+  }
+}
+
 pub struct AndParser<A, B> {
   pub left_parser: Arc<RwLock<dyn Parser<Output = A>>>,
   pub right_parser: Arc<RwLock<dyn Parser<Output = B>>>,
