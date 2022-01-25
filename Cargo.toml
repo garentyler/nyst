@@ -1,16 +1,11 @@
 [package]
 name = "nyst"
-version = "0.1.2"
+version = "0.1.3"
 authors = ["Garen Tyler <garentyler@gmail.com>"]
 edition = "2018"
-description = "A simple to use parser combinator library"
+description = "A simple to use parser library"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/garentyler/nyst/"
-keywords = ["parser", "parse", "nyst"]
+keywords = ["parser", "parse", "nyst", "stream"]
 categories = ["compilers", "encoding", "parsing"]
-
-[dependencies]
-regex = "1.4.1"
-ron = "0.6.2"
-serde = "1.0.117"
