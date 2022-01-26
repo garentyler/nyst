@@ -1,6 +1,7 @@
 use crate::*;
 use std::sync::{Arc, RwLock};
 
+/// Parses and then ignores the result, only advancing `offset`.
 pub struct IgnoreParser<A> {
   pub parser: Arc<RwLock<dyn Parser<Output = A>>>,
 }
@@ -33,6 +34,7 @@ impl<A> Parser for IgnoreParser<A> {
   }
 }
 
+/// Parses the left parser and then the right parser, and then joins the result in a tuple.
 pub struct AndParser<A, B> {
   pub left_parser: Arc<RwLock<dyn Parser<Output = A>>>,
   pub right_parser: Arc<RwLock<dyn Parser<Output = B>>>,
@@ -71,10 +73,12 @@ impl<A, B> Parser for AndParser<A, B> {
   }
 }
 
+/// A container for either the left result or the right result.
 pub enum OrParserSuccess<A, B> {
   Left(A),
   Right(B),
 }
+/// Parses the left parser and then the right parser, returning the first successful result.
 pub struct OrParser<A, B> {
   pub left_parser: Arc<RwLock<dyn Parser<Output = A>>>,
   pub right_parser: Arc<RwLock<dyn Parser<Output = B>>>,
@@ -118,6 +122,7 @@ impl<A, B> Parser for OrParser<A, B> {
   }
 }
 
+/// Repeatedly applies a parser over a given range.
 pub struct RangeParser<A> {
   pub parser: Arc<RwLock<dyn Parser<Output = A>>>,
   pub range: std::ops::Range<usize>,
@@ -175,6 +180,7 @@ impl<A> Parser for RangeParser<A> {
   }
 }
 
+/// Parses without advancing `offset`, returning `None` on error.
 pub struct PeekParser<A> {
   pub parser: Arc<RwLock<dyn Parser<Output = A>>>,
 }
