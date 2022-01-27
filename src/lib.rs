@@ -32,9 +32,11 @@ pub type ParseResult<T> = Result<T, ParseError>;
 pub enum ParseError {
     InvalidData,
     NotEnoughData,
-    Other(Box<dyn std::error::Error>),
+    Other(&'static str),
+    GenericError(Box<dyn std::error::Error>),
 }
 
+/// Includes all of the necessary traits for working with nyst.
 pub mod prelude {
-  pub use super::{Parser, ParseResult, ParseError};
+    pub use super::{ParseError, ParseResult, Parser};
 }
