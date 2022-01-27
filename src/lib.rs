@@ -29,3 +29,7 @@ pub enum ParseError {
     NotEnoughData,
     Other(Box<dyn std::error::Error>),
 }
+
+pub mod prelude {
+  pub use super::{Parser, ParseResult, ParseError};
+}
