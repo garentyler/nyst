@@ -27,5 +27,5 @@ pub type ParseResult<T> = Result<T, ParseError>;
 pub enum ParseError {
     InvalidData,
     NotEnoughData,
-    Io(std::io::Error),
+    Other(Box<dyn std::error::Error>),
 }
