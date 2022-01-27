@@ -192,3 +192,147 @@ impl<'parser, Input, Output> Parser for PeekParser<'parser, Input, Output> {
         }
     }
 }
+
+/// Parses the given literal.
+#[derive(Copy, Clone)]
+pub struct LiteralParser<Input: PartialEq + Clone> {
+    literal: Input,
+}
+impl<Input: PartialEq + Clone> LiteralParser<Input> {
+    pub fn new(literal: Input) -> Self {
+        LiteralParser { literal }
+    }
+}
+impl<Input: PartialEq + Clone> Parser for LiteralParser<Input> {
+    type Input = Input;
+    type Output = Input;
+
+    fn parse_unprotected(
+        &self,
+        data: &[Self::Input],
+        offset: &mut usize,
+    ) -> ParseResult<Self::Output> {
+        if data.len() <= *offset {
+            return Err(ParseError::NotEnoughData);
+        }
+        let value = data[*offset].clone();
+        *offset += 1;
+        if value == self.literal {
+            Ok(value)
+        } else {
+            Err(ParseError::InvalidData)
+        }
+    }
+}
+
+/// A parser that always fails.
+#[derive(Copy, Clone)]
+pub struct FailParser<Input> {
+    phantom: std::marker::PhantomData<Input>,
+}
+impl<Input> FailParser<Input> {
+    pub fn new() -> FailParser<Input> {
+        FailParser {
+            phantom: std::marker::PhantomData,
+        }
+    }
+}
+impl<Input> Default for FailParser<Input> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl<Input> Parser for FailParser<Input> {
+    type Input = Input;
+    type Output = ();
+
+    fn parse_unprotected(
+        &self,
+        _data: &[Self::Input],
+        _offset: &mut usize,
+    ) -> ParseResult<Self::Output> {
+        Err(ParseError::Other("FailParser"))
+    }
+}
+
+/// A parser that succeeds if the subparser fails.
+#[derive(Copy, Clone)]
+pub struct NotParser<'parser, Input, Output> {
+    pub parser: &'parser dyn Parser<Input = Input, Output = Output>,
+}
+impl<'parser, Input, Output> NotParser<'parser, Input, Output> {
+    pub fn new(parser: &'parser dyn Parser<Input = Input, Output = Output>) -> Self {
+        NotParser { parser }
+    }
+}
+impl<'parser, Input, Output> Parser for NotParser<'parser, Input, Output> {
+    type Input = Input;
+    type Output = ();
+
+    fn parse_unprotected(
+        &self,
+        data: &[Self::Input],
+        offset: &mut usize,
+    ) -> ParseResult<Self::Output> {
+        match self.parser.parse(data, offset) {
+            Ok(_) => Err(ParseError::Other("Subparser succeeded in NotParser")),
+            Err(_) => Ok(()),
+        }
+    }
+}
+
+/// Parses the left parser, then provides the output as the input to the right parser.
+#[derive(Copy, Clone)]
+pub struct PipeParser<'left, 'right, Input, Intermediary, Output> {
+    left_parser: &'left dyn Parser<Input = Input, Output = Intermediary>,
+    right_parser: &'right dyn Parser<Input = Intermediary, Output = Output>,
+}
+impl<'left, 'right, Input, Intermediary, Output>
+    PipeParser<'left, 'right, Input, Intermediary, Output>
+{
+    pub fn new(
+        left_parser: &'left dyn Parser<Input = Input, Output = Intermediary>,
+        right_parser: &'right dyn Parser<Input = Intermediary, Output = Output>,
+    ) -> Self {
+        PipeParser {
+            left_parser,
+            right_parser,
+        }
+    }
+}
+impl<'left, 'right, Input, Intermediary, Output> Parser
+    for PipeParser<'left, 'right, Input, Intermediary, Output>
+{
+    type Input = Input;
+    type Output = Output;
+
+    fn parse_unprotected(
+        &self,
+        data: &[Self::Input],
+        output: &mut usize,
+    ) -> ParseResult<Self::Output> {
+        self.right_parser
+            .parse(&[self.left_parser.parse(data, output)?], &mut 0)
+    }
+}
+
+/// Parses the given parser, then provides the output as the input to the given closure.
+#[derive(Copy, Clone)]
+pub struct MapParser<'parser, 'closure, Input, Intermediary, Output> {
+    parser: &'parser dyn Parser<Input = Input, Output = Intermediary>,
+    closure: &'closure dyn Fn(Intermediary) -> ParseResult<Output>,
+}
+impl<'parser, 'closure, Input, Intermediary, Output> Parser
+    for MapParser<'parser, 'closure, Input, Intermediary, Output>
+{
+    type Input = Input;
+    type Output = Output;
+
+    fn parse_unprotected(
+        &self,
+        data: &[Self::Input],
+        output: &mut usize,
+    ) -> ParseResult<Self::Output> {
+        (self.closure)(self.parser.parse(data, output)?)
+    }
+}
