@@ -409,6 +409,9 @@ impl<'parser, Input: 'parser + PartialEq + Clone + Debug> Parser<'parser> for Li
     type Output = Input;
 
     fn parse(&self, data: &'parser [Self::Input]) -> ParseResult<Self::Output> {
+        if data.len() <= 1 {
+            return Err(ParseError::NotEnoughData);
+        }
         if data[0] == self.literal {
             Ok((self.literal.clone(), 1))
         } else {
