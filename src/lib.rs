@@ -2,12 +2,11 @@
 pub mod parser;
 
 /// Generic parser trait.
-/// Only `Output` and `parse_unprotected` need to be defined to apply the trait.
+/// Only `Output` and `parse` need to be defined to apply the trait.
 pub trait Parser<'parser> {
     type Input;
     type Output;
-    /// Parse `data` given `offset`.
-    /// May leave `offset` in an incorrect state on failure.
+    /// Parse `data`, and return a `ParseResult`.
     fn parse(&self, data: &'parser [Self::Input]) -> ParseResult<Self::Output>;
 }
 

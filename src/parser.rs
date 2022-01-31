@@ -1,7 +1,25 @@
 use crate::*;
 use std::fmt::Debug;
 
-/// Parses and then ignores the result, only advancing `offset`.
+/// Parses and then ignores the result, still returning the units read.
+/// 
+/// # Example
+/// ```rust
+/// use nyst::{prelude::*, parser::{LiteralParser, IgnoreParser}};
+/// 
+/// let a_parser = LiteralParser::new('a'); // This can be any struct that implements `nyst::Parser`.
+/// 
+/// let ignore_parser = IgnoreParser::new(&a_parser);
+/// 
+/// let result = ignore_parser.parse(&['a']);
+/// assert_eq!(
+///   result,
+///   ParseResult::Ok((
+///     (), // The result from the internal parser was ignored.
+///     1, // The number of units read from the input.
+///   ))
+/// );
+/// ```
 #[derive(Copy, Clone)]
 pub struct IgnoreParser<'parser, Input: Debug, Output> {
     pub parser: &'parser dyn Parser<'parser, Input = Input, Output = Output>,
@@ -17,13 +35,53 @@ impl<'parser, Input: Debug, Output> Parser<'parser> for IgnoreParser<'parser, In
 
     fn parse(&self, data: &'parser [Self::Input]) -> ParseResult<Self::Output> {
         match self.parser.parse(data) {
-            Ok((_result, _offset)) => Ok(((), 0)),
+            Ok((_result, offset)) => Ok(((), offset)),
             Err(error) => Err(error),
         }
     }
 }
 
 /// Parses the left parser and then the right parser, and then joins the result in a tuple.
+/// 
+/// `AndParser` will parse the left parser first. If the left parser fails, that error is passed on.
+/// After running the left parser, it will run the right parser with the offset provided by the left,
+/// and the result is also unwrapped. When both succeed, `AndParser` returns a tuple of `(left_result, right_result)`.
+/// 
+/// # Example
+/// ```rust
+/// use nyst::{prelude::*, parser::{LiteralParser, AndParser}};
+/// 
+/// // Both of these can be any struct that implements `nyst::Parser`.
+/// let a_parser = LiteralParser::new('a');
+/// let b_parser = LiteralParser::new('b');
+/// 
+/// let and_parser = AndParser::new(
+///   &a_parser,
+///   &b_parser,
+/// );
+/// 
+/// // This should succeed.
+/// let result = and_parser.parse(&['a', 'b']);
+/// assert_eq!(
+///   result,
+///   ParseResult::Ok((
+///     // Both parsers succeeded, returning `(left_result, right_result)`
+///     ('a', 'b'),
+///     2, // The number of units read from the input.
+///   )),
+/// );
+/// 
+/// // This should fail.
+/// let result = and_parser.parse(&['c', 'b']);
+/// assert_eq!(
+///   result,
+///   // This failed because the left subparser expected 'a' but got 'c'.
+///   // The right subparser was never applied.
+///   ParseResult::Err(
+///     ParseError::InvalidData
+///   ),
+/// );
+/// ```
 #[derive(Copy, Clone)]
 pub struct AndParser<'parser, Input: Debug, LeftOutput, RightOutput> {
     pub left_parser: &'parser dyn Parser<'parser, Input = Input, Output = LeftOutput>,
@@ -55,13 +113,59 @@ impl<'parser, Input: Debug, LeftOutput, RightOutput> Parser<'parser>
     }
 }
 
-/// A container for either the left result or the right result.
+/// A simple container for either the left result or the right result.
 #[derive(Copy, Clone, PartialEq)]
 pub enum OrParserSuccess<LeftOutput, RightOutput> {
     Left(LeftOutput),
     Right(RightOutput),
 }
 /// Parses the left parser and then the right parser, returning the first successful result.
+/// 
+/// # Example
+/// ```rust
+/// use nyst::{prelude::*, parser::{LiteralParser, OrParser}};
+/// 
+/// // Both of these can be any struct that implements `nyst::Parser`.
+/// let a_parser = LiteralParser::new('a');
+/// let b_parser = LiteralParser::new('b');
+/// 
+/// let or_parser = OrParser::new(
+///   &a_parser,
+///   &b_parser,
+/// );
+/// 
+/// let result = or_parser.parse(&['a']);
+/// assert_eq!(
+///   result,
+///   ParseResult::Ok((
+///     // The left parser succeeded, meaning the
+///     // right parser did not need to be used.
+///     OrParserSuccess::Left('a'),
+///     1, // The number of units read from the input.
+///   ))
+/// );
+/// 
+/// let result = or_parser.parse(&['b']);
+/// assert_eq!(
+///   result,
+///   ParseResult::Ok((
+///     // The left parser failed,
+///     // so the right parser was applied,
+///     // which succeeded.
+///     OrParserSuccess::Right('b'),
+///     1, // The number of units read from the input.
+///   ))
+/// );
+/// 
+/// let result = or_parser.parse(&['c']);
+/// assert_eq!(
+///   result,
+///   // Both the left and right parser failed, resulting in an error.
+///   ParseResult::Err(
+///     ParseError::InvalidData
+///   ),
+/// );
+/// ```
 #[derive(Copy, Clone)]
 pub struct OrParser<'parser, Input: Debug, LeftOutput, RightOutput> {
     pub left_parser: &'parser dyn Parser<'parser, Input = Input, Output = LeftOutput>,
@@ -102,6 +206,56 @@ impl<'parser, Input: Debug, LeftOutput, RightOutput> Parser<'parser>
 }
 
 /// Repeatedly applies a parser over a given range.
+/// 
+/// Given a range of `start..end`, `RangeParser` applies the given parser as many times as possible up to `start` times,
+/// failing if `start` cannot be met. After `start`, it will keep applying the parser until it reaches `end` iterations,
+/// after which it returns.
+/// 
+/// # Examples
+/// 
+/// Using a range:
+/// ```rust
+/// use nyst::{prelude::*, parser::{LiteralParser, RangeParser}};
+/// 
+/// let a_parser = LiteralParser::new('a'); // Can be any struct implementing `nyst::Parser`
+/// let range = 3..5; // The start is 3, and the end is 5.
+/// let data = vec!['a', 'a', 'a', 'a']; // 4 iterations
+/// 
+/// let result = RangeParser::range(
+///   &a_parser,
+///   range,
+/// ).parse(data.as_slice());
+/// 
+/// assert_eq!(
+///     result,
+///     ParseResult::Ok((
+///         vec!['a', 'a', 'a', 'a'], // The parser output.
+///         4, // The number of units read from the input.
+///     ))
+/// );
+/// ```
+/// 
+/// Using a number of repetitions:
+/// ```rust
+/// use nyst::{prelude::*, parser::{LiteralParser, RangeParser}};
+/// 
+/// let a_parser = LiteralParser::new('a'); // Can be any struct implementing `nyst::Parser`
+/// let repetitions = 4; // Internally this gets represented as a range of `4..4`.
+/// let data = vec!['a', 'a', 'a', 'a']; // 4 iterations
+/// 
+/// let result = RangeParser::repetitions(
+///   &a_parser,
+///   repetitions,
+/// ).parse(data.as_slice());
+/// 
+/// assert_eq!(
+///     result,
+///     ParseResult::Ok((
+///         vec!['a', 'a', 'a', 'a'], // The parser output.
+///         4, // The number of units read from the input.
+///     ))
+/// );
+/// ```
 #[derive(Clone)]
 pub struct RangeParser<'parser, Input: Debug, Output> {
     pub parser: &'parser dyn Parser<'parser, Input = Input, Output = Output>,
@@ -153,7 +307,42 @@ impl<'parser, Input: Debug, Output> Parser<'parser> for RangeParser<'parser, Inp
     }
 }
 
-/// Parses without advancing `offset`, returning `None` on error.
+/// Always succeeds, turning the `Result` into an `Option`, returning 0 for the units read.
+/// 
+/// `PeekParser` will try to apply the given parser without advancing the number of units read,
+/// allowing a simple way to peek ahead in the data. If the subparser fails, it simply
+/// returns `ParseResult::Ok((None, 0))`. If the subparser succeeds, it returns
+/// `ParseResult::Ok((Some(<result>), <units read>))`.
+/// 
+/// # Example
+/// ```rust
+/// use nyst::{prelude::*, parser::{LiteralParser, PeekParser}};
+/// 
+/// let a_parser = LiteralParser::new('a'); // Can be any struct implementing `nyst::Parser`
+/// 
+/// let peek_parser = PeekParser::new(
+///   &a_parser,
+/// );
+/// 
+/// let result = peek_parser.parse(&['a']);
+/// assert_eq!(
+///   result,
+///   ParseResult::Ok((
+///     Some('a'), // The subparser succeeded, and here is the result.
+///     0, // This should always be 0.
+///   ))
+/// );
+/// 
+/// // There is no 'a' here to parse, this should fail.
+/// let result = peek_parser.parse(&[]);
+/// assert_eq!(
+///   result,
+///   ParseResult::Ok((
+///     None, // The subparser failed, so `None` is returned.
+///     0, // This should always be 0.
+///   ))
+/// );
+/// ```
 #[derive(Copy, Clone)]
 pub struct PeekParser<'parser, Input: Debug, Output> {
     pub parser: &'parser dyn Parser<'parser, Input = Input, Output = Output>,
@@ -176,6 +365,36 @@ impl<'parser, Input: Debug, Output> Parser<'parser> for PeekParser<'parser, Inpu
 }
 
 /// Parses the given literal.
+/// 
+/// If `data[0]` does not equal the given literal, `LiteralParser`
+/// returns `ParseResult::Err(ParseError::InvalidData)`. If it does
+/// equal the literal, it just returns the value.
+/// 
+/// # Example
+/// ```rust
+/// use nyst::{prelude::*, parser::LiteralParser};
+/// 
+/// let literal_parser = LiteralParser::new('a'); // Can be any struct implementing `nyst::Parser`
+/// 
+/// // This should succeed, `data[0] /* with the value of 'a' */ == 'a'`
+/// let result = literal_parser.parse(&['a']);
+/// assert_eq!(
+///   result,
+///   ParseResult::Ok((
+///     'a', // Success! The literal was found and returned.
+///     1, // The number of units read from the input.
+///   )),
+/// );
+/// 
+/// // This should fail, `data[0] /* with the value of 'b' */ != 'a'`
+/// let result = literal_parser.parse(&['b']);
+/// assert_eq!(
+///   result,
+///   ParseResult::Err(
+///     ParseError::InvalidData
+///   ),
+/// );
+/// ```
 #[derive(Copy, Clone)]
 pub struct LiteralParser<Input: PartialEq + Clone + Debug> {
     literal: Input,
@@ -199,6 +418,22 @@ impl<'parser, Input: 'parser + PartialEq + Clone + Debug> Parser<'parser> for Li
 }
 
 /// A parser that always fails.
+/// 
+/// # Example
+/// ```rust
+/// use nyst::{prelude::*, parser::{LiteralParser, FailParser}};
+/// 
+/// let a_parser = LiteralParser::new('a'); // This can be any struct that implements `nyst::Parser`.
+/// 
+/// let fail_parser = FailParser::new(&a_parser);
+/// 
+/// let result = fail_parser.parse(&['a']);
+/// assert_eq!(
+///   result,
+///   // This should always be `ParseResult::Err`, no matter the input data.
+///   ParseResult::Err(ParseError::Other("FailParser")),
+/// );
+/// ```
 #[derive(Copy, Clone)]
 pub struct FailParser<Input> {
     phantom: std::marker::PhantomData<Input>,
@@ -225,6 +460,33 @@ impl<Input> Parser<'_> for FailParser<Input> {
 }
 
 /// A parser that succeeds if the subparser fails.
+/// 
+/// # Example
+/// ```rust
+/// use nyst::{prelude::*, parser::{LiteralParser, NotParser}};
+/// 
+/// let a_parser = LiteralParser::new('a'); // This can be any struct that implements `nyst::Parser`.
+/// 
+/// let not_parser = NotParser::new(&a_parser);
+/// 
+/// 
+/// // This should fail because the subparser succeeds.
+/// let result = not_parser.parse(&['a']);
+/// assert_eq!(
+///   result,
+///   ParseResult::Err(ParseError::Other("Subparser succeeded in NotParser")),
+/// );
+/// 
+/// // This should succeed because the subparser fails.
+/// let result = not_parser.parse(&['b']);
+/// assert_eq!(
+///   result,
+///   ParseResult::Ok((
+///     (), // There is no output to return here, so we just return the unit type `()`.
+///     0, // The number of units read from the input.
+///   )),
+/// );
+/// ```
 #[derive(Clone)]
 pub struct NotParser<'parser, Input: Debug, Output> {
     pub parser: &'parser dyn Parser<'parser, Input = Input, Output = Output>,
@@ -247,6 +509,30 @@ impl<'parser, Input: Debug, Output> Parser<'parser> for NotParser<'parser, Input
 }
 
 /// Parses the given parser, then provides the output as the input to the given closure.
+/// 
+/// `MapParser` will apply the given parser and then unwrap the result,
+/// passing that result into the given closure.
+/// 
+/// # Example
+/// ```rust
+/// use nyst::{prelude::*, parser::{LiteralParser, MapParser}};
+/// 
+/// let a_parser = LiteralParser::new('a'); // This can be any struct that implements `nyst::Parser`.
+/// let next_char_closure = |result: (char, usize)| -> ParseResult<char> {
+///   Ok((((result.0 as u8) + 1) as char, result.1))
+/// };
+/// 
+/// let map_parser = MapParser::new(&a_parser, &next_char_closure);
+/// 
+/// let result = map_parser.parse(&['a']);
+/// assert_eq!(
+///   result,
+///   ParseResult::Ok((
+///     'b'
+///     1,
+///   )),
+/// );
+/// ```
 #[derive(Copy, Clone)]
 pub struct MapParser<'parser, 'closure, Input, Intermediary, Output> {
     parser: &'parser dyn Parser<'parser, Input = Input, Output = Intermediary>,
