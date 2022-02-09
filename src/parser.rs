@@ -129,6 +129,7 @@ pub enum OrParserSuccess<LeftOutput, RightOutput> {
 /// let a_parser = LiteralParser::new('a');
 /// let b_parser = LiteralParser::new('b');
 ///
+/// // The left and right parsers may have different `Output` types.
 /// let or_parser = OrParser::new(
 ///   &a_parser,
 ///   &b_parser,
@@ -202,6 +203,87 @@ impl<'parser, Input: Debug, LeftOutput, RightOutput> Parser<'parser>
                 Err(error) => Err(error),
             }
         }
+    }
+}
+
+/// Parses all provided parsers, returning the first successful result.
+///
+/// # Example
+/// ```rust
+/// use nyst::{prelude::*, parser::{LiteralParser, MultipleOrParser}};
+///
+/// // All of these can be any struct that implements `nyst::Parser`.
+/// let a_parser = LiteralParser::new('a');
+/// let b_parser = LiteralParser::new('b');
+/// let c_parser = LiteralParser::new('c');
+///
+/// let multiple_or_parser = MultipleOrParser::new(
+///   &a_parser,
+///   &b_parser,
+///   &c_parser,
+/// );
+///
+/// let result = multiple_or_parser.parse(&['a']);
+/// assert_eq!(
+///   result,
+///   ParseResult::Ok((
+///     // The first parser succeeded, meaning the next parsers did not need to be used.
+///     'a',
+///     1, // The number of units read from the input.
+///   ))
+/// );
+///
+/// let result = multiple_or_parser.parse(&['c']);
+/// assert_eq!(
+///   result,
+///   ParseResult::Ok((
+///     // Both `a_parser` and `b_parser` failed, but `c_parser succeeded`.
+///     'c',
+///     1, // The number of units read from the input.
+///   ))
+/// );
+///
+/// let result = multiple_or_parser.parse(&['d']);
+/// assert_eq!(
+///   result,
+///   // All parsers failed.
+///   ParseResult::Err(
+///     ParseError::InvalidData
+///   ),
+/// );
+/// ```
+#[derive(Clone)]
+pub struct MultipleOrParser<'parser, Input: Debug, Output> {
+    pub parsers: Vec<&'parser dyn Parser<'parser, Input = Input, Output = Output>>,
+}
+impl<'parser, Input: Debug, Output>
+    MultipleOrParser<'parser, Input, Output>
+{
+    pub fn new(
+        parsers: Vec<&'parser dyn Parser<'parser, Input = Input, Output = Output>>,
+    ) -> Self {
+        MultipleOrParser {
+            parsers,
+        }
+    }
+}
+impl<'parser, Input: Debug, Output> Parser<'parser>
+    for MultipleOrParser<'parser, Input, Output>
+{
+    type Input = Input;
+    type Output = Output;
+
+    fn parse(
+        &self,
+        data: &'parser [Self::Input],
+    ) -> ParseResult<Output> {
+        for parser in &self.parsers {
+            let result = parser.parse(data);
+            if result.is_ok() {
+                return result;
+            }
+        }
+        Err(ParseError::InvalidData)
     }
 }
 
@@ -292,16 +374,18 @@ impl<'parser, Input: Debug, Output> Parser<'parser> for RangeParser<'parser, Inp
             offset += offset_delta;
         }
         // Parse the optional ones.
-        let mut index = out.len() - 1;
+        let mut index = self.range.start;
         loop {
-            index += 1;
-            if index >= self.range.end {
+            if index > self.range.end {
                 break;
             }
             if let Ok((item, offset_delta)) = self.parser.parse(&data[offset..]) {
                 out.push(item);
                 offset += offset_delta;
+            } else {
+                break;
             }
+            index += 1;
         }
         Ok((out, offset))
     }
@@ -409,7 +493,7 @@ impl<'parser, Input: 'parser + PartialEq + Clone + Debug> Parser<'parser> for Li
     type Output = Input;
 
     fn parse(&self, data: &'parser [Self::Input]) -> ParseResult<Self::Output> {
-        if data.len() <= 1 {
+        if data.len() < 1 {
             return Err(ParseError::NotEnoughData);
         }
         if data[0] == self.literal {
@@ -420,7 +504,7 @@ impl<'parser, Input: 'parser + PartialEq + Clone + Debug> Parser<'parser> for Li
     }
 }
 
-/// Parses the given literal.
+/// Parses the given literal slice.
 ///
 /// If `data[..]` does not equal the given slice, `SliceLiteralParser`
 /// returns `ParseResult::Err(ParseError::InvalidData)`. If it does
@@ -476,6 +560,89 @@ impl<'parser, Input: 'parser + PartialEq + Clone + Debug> Parser<'parser>
         } else {
             Err(ParseError::InvalidData)
         }
+    }
+}
+
+
+/// Parses the given literal, with multiple options.
+///
+/// Essentially shorthand for creating multiple `LiteralParser`s
+/// and joining them with a `MultipleOrParser`.
+///
+/// # Example
+/// ```rust
+/// use nyst::{prelude::*, parser::MultipleLiteralParser};
+///
+/// let letter_parser = MultipleLiteralParser::new(vec![
+///     'a',
+///     'b',
+///     'c',
+/// ]);
+///
+/// let result = letter_parser.parse(&['a']);
+/// assert_eq!(
+///   result,
+///   ParseResult::Ok((
+///     'a',
+///     1, // The number of units read from the input.
+///   ))
+/// );
+///
+/// let result = letter_parser.parse(&['c']);
+/// assert_eq!(
+///   result,
+///   ParseResult::Ok((
+///     'c',
+///     1, // The number of units read from the input.
+///   ))
+/// );
+///
+/// let result = letter_parser.parse(&['d']);
+/// assert_eq!(
+///   result,
+///   // All parsers failed.
+///   ParseResult::Err(
+///     ParseError::InvalidData
+///   ),
+/// );
+/// ```
+#[derive(Clone)]
+pub struct MultipleLiteralParser<Input: PartialEq + Clone + Debug> {
+    pub literals: Vec<Input>,
+}
+impl<Input: PartialEq + Clone + Debug>
+MultipleLiteralParser<Input>
+{
+    pub fn new(
+        literals: Vec<Input>,
+    ) -> Self {
+        MultipleLiteralParser {
+            literals,
+        }
+    }
+}
+impl<'parser, Input: PartialEq + Clone + Debug> Parser<'parser>
+    for MultipleLiteralParser<Input>
+{
+    type Input = Input;
+    type Output = Input;
+
+    fn parse(
+        &self,
+        data: &'parser [Self::Input],
+    ) -> ParseResult<Self::Output> {
+        if data.len() < 1 {
+            return Err(ParseError::NotEnoughData);
+        }
+        for literal in &self.literals {
+            if data[0] == *literal {
+                return Ok((
+                    literal.clone(),
+                    1,
+                ));
+            }
+        }
+        Err(ParseError::InvalidData)
     }
 }
 
