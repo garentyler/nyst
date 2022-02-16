@@ -20,15 +20,16 @@ struct Color {
 
 #[derive(Clone)]
 struct HexCodeParser {}
-impl<'parser> Parser<'parser> for HexCodeParser {
+impl Parser for HexCodeParser {
     type Input = u8;
     type Output = Color;
 
-    fn parse(&self, data: &'parser [Self::Input]) -> ParseResult<Self::Output> {
-        let start_hash = LiteralParser::new(b'#');
-        let hex_to_byte = HexToByteParser {};
-        let three_hex_pairs = RangeParser::repetitions(&hex_to_byte, 3);
-        let result = AndParser::new(&start_hash, &three_hex_pairs).parse(data)?;
+    fn parse(&self, data: &[Self::Input]) -> ParseResult<Self::Output> {
+        let result = AndParser::new(
+            &LiteralParser::new(b'#'),
+            &RangeParser::repetitions(&HexToByteParser {}, 3),
+        )
+        .parse(data)?;
 
         let (result, units_read) = result;
         Ok((
@@ -44,11 +45,11 @@ impl<'parser> Parser<'parser> for HexCodeParser {
 
 #[derive(Clone)]
 struct HexToByteParser {}
-impl<'parser> Parser<'parser> for HexToByteParser {
+impl Parser for HexToByteParser {
     type Input = u8;
     type Output = u8;
 
-    fn parse(&self, data: &'parser [Self::Input]) -> ParseResult<Self::Output> {
+    fn parse(&self, data: &[Self::Input]) -> ParseResult<Self::Output> {
         if data.len() < 2 {
             return Err(ParseError::NotEnoughData);
         }
