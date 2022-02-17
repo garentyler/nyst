@@ -192,6 +192,23 @@ impl<I> Parser for FailParser<I> {
     }
 }
 
+/// A parser that uses a custom function.
+pub struct CustomParser<'f, I, O> {
+    closure: &'f dyn Fn(&[I]) -> ParseResult<O>,
+}
+impl<'f, I, O> CustomParser<'f, I, O> {
+    pub fn new(closure: &'f dyn Fn(&[I]) -> ParseResult<O>) -> Self {
+        CustomParser { closure }
+    }
+}
+impl<'f, I, O> Parser for CustomParser<'f, I, O> {
+    type Input = I;
+    type Output = O;
+    fn parse(&self, data: &[Self::Input]) -> ParseResult<Self::Output> {
+        (self.closure)(data)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,5 +350,24 @@ mod tests {
             fail_parser.parse(&data),
             Err(ParseError::Other("FailParser"))
         );
+    }
+
+    #[test]
+    fn custom_parser_works() {
+        fn byte_parser(data: &[u8]) -> ParseResult<i8> {
+            if !data.is_empty() {
+                let data = [data[0]];
+                Ok((i8::from_be_bytes(data), 1))
+            } else {
+                Err(ParseError::NotEnoughData)
+            }
+        }
+        let custom_parser = CustomParser::new(&byte_parser);
+
+        let no_data = [];
+        let data = [16];
+
+        assert_eq!(custom_parser.parse(&no_data), Err(ParseError::NotEnoughData));
+        assert_eq!(custom_parser.parse(&data), Ok((16i8, 1)));
     }
 }
