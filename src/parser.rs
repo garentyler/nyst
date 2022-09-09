@@ -52,6 +52,35 @@ impl<'l, 'r, I, L, R> Parser for AndParser<'l, 'r, I, L, R> {
     }
 }
 
+/// Runs the provided parsers, returning only if all parsers succeed.
+#[derive(Clone)]
+pub struct BatchParser<'p, I, O> {
+    parsers: Vec<&'p dyn Parser<Input = I, Output = O>>,
+}
+impl<'p, I, O> BatchParser<'p, I, O> {
+    pub fn new(
+        parsers: Vec<&'p dyn Parser<Input = I, Output = O>>,
+    ) -> Self {
+        BatchParser {
+            parsers,
+        }
+    }
+}
+impl<'p, I, O> Parser for BatchParser<'p, I, O> {
+    type Input = I;
+    type Output = Vec<O>;
+    fn parse(&self, data: &[Self::Input]) -> ParseResult<Self::Output> {
+        let mut output = vec![];
+        let mut offset = 0;
+        for parser in &self.parsers {
+            let (out, offset_delta) = parser.parse(&data[offset..])?;
+            output.push(out);
+            offset += offset_delta;
+        }
+        Ok((output, offset))
+    }
+}
+
 /// A simple container for either the left result or the right result.
 #[derive(PartialEq, Debug)]
 pub enum OrParserSuccess<L, R> {
@@ -90,6 +119,38 @@ impl<'l, 'r, I, L, R> Parser for OrParser<'l, 'r, I, L, R> {
     }
 }
 
+/// Runs the provided parsers, returning the first successful result.
+#[derive(Clone)]
+pub struct SwitchParser<'p, I, O> {
+    parsers: Vec<&'p dyn Parser<Input = I, Output = O>>,
+}
+impl<'p, I, O> SwitchParser<'p, I, O> {
+    pub fn new(
+        parsers: Vec<&'p dyn Parser<Input = I, Output = O>>,
+    ) -> Self {
+        SwitchParser {
+            parsers,
+        }
+    }
+}
+impl<'p, I, O> Parser for SwitchParser<'p, I, O> {
+    type Input = I;
+    type Output = O;
+    fn parse(&self, data: &[Self::Input]) -> ParseResult<Self::Output> {
+        let mut most_recent_error = None;
+        for parser in &self.parsers {
+            let result = parser.parse(data);
+            if result.is_ok() {
+                return result;
+            } else {
+                // This is safe, we just checked if it's ok.
+                most_recent_error = unsafe { Some(result.unwrap_err_unchecked()) };
+            }
+        }
+        Err(most_recent_error.unwrap())
+    }
+}
+
 /// Repeatedly applies a parser over a given range.
 ///
 /// Given a range of `start..end`, `RangeParser` applies the given parser as many times as possible up to `start` times,
@@ -112,6 +173,12 @@ impl<'p, I, O> RangeParser<'p, I, O> {
         range: std::ops::Range<usize>,
     ) -> Self {
         RangeParser { parser, range }
+    }
+    pub fn zero_or_more(parser: &'p dyn Parser<Input = I, Output = O>) -> Self {
+        RangeParser::range(parser, 0..usize::MAX)
+    }
+    pub fn one_or_more(parser: &'p dyn Parser<Input = I, Output = O>) -> Self {
+        RangeParser::range(parser, 0..usize::MAX)
     }
 }
 impl<'p, I, O> Parser for RangeParser<'p, I, O> {
@@ -206,6 +273,27 @@ impl<'f, I, O> Parser for CustomParser<'f, I, O> {
     type Output = O;
     fn parse(&self, data: &[Self::Input]) -> ParseResult<Self::Output> {
         (self.closure)(data)
+    }
+}
+
+/// Parses the subparser and then runs a closure on the result.
+pub struct MapParser<'f, 'p, I, M, O> {
+    parser: &'p dyn Parser<Input = I, Output = M>,
+    closure: &'f dyn Fn((M, usize)) -> ParseResult<O>,
+}
+impl<'f, 'p, I, M, O> MapParser<'f, 'p, I, M, O> {
+    pub fn new(parser: &'p dyn Parser<Input = I, Output = M>, closure: &'f dyn Fn((M, usize)) -> ParseResult<O>) -> Self {
+        MapParser {
+            parser,
+            closure,
+        }
+    }
+}
+impl<'f, 'p, I, M, O> Parser for MapParser<'f, 'p, I, M, O> {
+    type Input = I;
+    type Output = O;
+    fn parse(&self, data: &[Self::Input]) -> ParseResult<Self::Output> {
+        (self.closure)(self.parser.parse(data)?)
     }
 }
 
